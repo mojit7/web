@@ -15,6 +15,7 @@ namespace Shop
 /-- Money: integer cents -/
 @[ext] structure Money where
   cents : Int
+  deriving Repr, DecidableEq, Inhabited
 
 namespace Money
 

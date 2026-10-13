@@ -1,111 +1,95 @@
 /-
-# Coupon Module - Formal Proofs for Coupon Operations
+# Coupon Module - Formal Proofs for Coupons (Order #4)
 
-This module provides the formal definitions for coupon operations.
-Coupons are a type of discount that can be applied to orders.
+A coupon is a code plus a Discount plus an applicability condition
+(minimum subtotal). It only applies when the condition is met.
 
 ## Key Invariants:
-1. Coupons have a discount value
-2. Coupons can be active or expired
-3. Coupons can have usage limits
+1. A coupon whose condition fails yields a zero discount.
+2. A valid coupon yields a non-negative discount on a non-negative subtotal.
+3. A coupon never discounts more than the subtotal.
+No Mathlib: core Lean 4 only. Zero sorry, zero axiom.
 -/
 
 import Shop.Money
-import Shop.Discount
 import Shop.Rate
-import Mathlib.Data.Int.Basic
+import Shop.Discount
 
 namespace Shop
 
--- Coupon type
-@[ext]
+/-- Coupon applicability condition -/
+structure CouponCondition where
+  minSubtotal : Money
+  deriving Repr, DecidableEq
+
+/-- Coupon: code + discount + condition -/
 structure Coupon where
   code : String
   discount : Discount
-  is_active : Bool
-  max_uses : Nat
-  uses : Nat
+  condition : CouponCondition
+  deriving Repr, DecidableEq
 
--- Create a new coupon
-def Coupon.new (code : String) (discount : Discount) (max_uses : Nat) : Coupon := 
-  ⟨code, discount, true, max_uses, 0⟩
+namespace Coupon
 
--- Zero coupon (no discount)
-def Coupon.zero : Coupon := 
-  ⟨"", Discount.zero, false, 0, 0⟩
+/-- Is the coupon applicable to this subtotal? -/
+def isApplicable (c : Coupon) (subtotal : Money) : Prop :=
+  c.condition.minSubtotal.cents ≤ subtotal.cents
 
--- Check if coupon is valid (active and has uses remaining)
-def Coupon.isValid (c : Coupon) : Bool := 
-  c.is_active && c.uses < c.max_uses
-
--- Apply coupon to a money amount
-def applyCoupon (amount : Money) (coupon : Coupon) : Money := 
-  if coupon.isValid then
-    amount.sub coupon.discount.amount
+/-- Apply a coupon: the discount amount if applicable, otherwise zero -/
+def apply (c : Coupon) (subtotal : Money) : Money :=
+  if c.condition.minSubtotal.cents ≤ subtotal.cents then
+    Discount.amount c.discount subtotal
   else
-    amount
+    Money.zero
 
--- Theorem: Applying valid coupon reduces amount
-theorem coupon_reduces_amount (amount : Money) (coupon : Coupon) : 
-  coupon.isValid → coupon.discount.amount.cents > 0 → 
-  (applyCoupon amount coupon).cents < amount.cents := by
-  intro h_valid h_positive
-  simp [applyCoupon, Coupon.isValid] at h_valid ⊢
-  split at h_valid
-  · rename_i h_active h_uses
-    simp [h_active, h_uses]
-    have : coupon.discount.amount.cents > 0 := h_positive
-    have : amount.cents - coupon.discount.amount.cents < amount.cents := by
-      apply Int.sub_lt_self
-      exact Int.ofNat_pos.mpr (Nat.pos_of_ne_zero (by
-        -- coupon.discount.amount.cents > 0
-        -- This needs to be connected to the Money type
-        sorry))
-    exact this
-  · contradiction
+/-- Validity: valid discount and a non-negative minimum -/
+def valid (c : Coupon) : Prop :=
+  Discount.valid c.discount ∧ 0 ≤ c.condition.minSubtotal.cents
 
--- Theorem: Applying invalid coupon returns original amount
-theorem coupon_invalid_no_change (amount : Money) (coupon : Coupon) : 
-  ¬coupon.isValid → applyCoupon amount coupon = amount := by
-  intro h_invalid
-  simp [applyCoupon, Coupon.isValid]
-  split at h_invalid
-  · rename_i h_not_active
-    simp [h_not_active]
-  · rename_i h_uses_exhausted
-    simp [h_uses_exhausted]
-  · simp [h_invalid]
+/-- The zero coupon: empty code, zero discount, no minimum -/
+def zero : Coupon :=
+  { code := ""
+    discount := Discount.zero
+    condition := { minSubtotal := Money.zero } }
 
--- Theorem: Zero coupon returns original amount
-theorem coupon_zero_no_change (amount : Money) : 
-  applyCoupon amount Coupon.zero = amount := by
-  simp [applyCoupon, Coupon.zero, Coupon.isValid, Discount.zero]
-  -- Coupon.zero.is_active = false, so coupon is not valid
-  -- Therefore, applyCoupon returns amount
-  rfl
+/-! ### Theorems -/
 
--- Use a coupon (increment uses counter)
-def Coupon.use (c : Coupon) : Coupon := 
-  { c with uses := c.uses + 1 }
+/-- A non-applicable coupon yields a zero discount -/
+theorem coupon_not_applicable_zero (c : Coupon) (subtotal : Money)
+    (h : ¬ Coupon.isApplicable c subtotal) :
+    Coupon.apply c subtotal = Money.zero := by
+  show (if c.condition.minSubtotal.cents ≤ subtotal.cents
+      then Discount.amount c.discount subtotal else Money.zero) = Money.zero
+  rw [if_neg h]
 
--- Theorem: Using a coupon increments uses
-theorem coupon_use_increments : ∀ c : Coupon, (c.use).uses = c.uses + 1 := by
-  intro c
-  rfl
+/-- A valid coupon yields a non-negative discount on a non-negative subtotal -/
+theorem coupon_non_negative (c : Coupon) (subtotal : Money)
+    (hs : 0 ≤ subtotal.cents) (hc : Coupon.valid c) :
+    0 ≤ (Coupon.apply c subtotal).cents := by
+  show 0 ≤ (if c.condition.minSubtotal.cents ≤ subtotal.cents
+      then Discount.amount c.discount subtotal else Money.zero).cents
+  split
+  · next h => exact Discount.discount_non_negative c.discount subtotal hc.1 hs
+  · next h => exact Int.le_refl 0
 
--- Theorem: Using a coupon preserves other fields
-theorem coupon_use_preserves : ∀ c : Coupon, 
-  (c.use).code = c.code ∧ 
-  (c.use).discount = c.discount ∧ 
-  (c.use).is_active = c.is_active ∧ 
-  (c.use).max_uses = c.max_uses := by
-  intro c
-  constructor
-  · rfl
-  constructor
-  · rfl
-  constructor
-  · rfl
-  · rfl
+/-- A coupon never discounts more than the subtotal -/
+theorem coupon_bounded (c : Coupon) (subtotal : Money)
+    (hs : 0 ≤ subtotal.cents) (hc : Coupon.valid c) :
+    (Coupon.apply c subtotal).cents ≤ subtotal.cents := by
+  show (if c.condition.minSubtotal.cents ≤ subtotal.cents
+      then Discount.amount c.discount subtotal else Money.zero).cents
+      ≤ subtotal.cents
+  split
+  · next h => exact Discount.discount_bounded c.discount subtotal hc.1 hs
+  · next h => exact hs
 
+/-- The zero coupon always yields a zero discount -/
+theorem coupon_zero_amount (subtotal : Money) (hs : 0 ≤ subtotal.cents) :
+    Coupon.apply Coupon.zero subtotal = Money.zero := by
+  show (if (0 : Int) ≤ subtotal.cents
+      then Discount.amount Discount.zero subtotal else Money.zero) = Money.zero
+  rw [if_pos hs]
+  exact Discount.discount_zero_amount subtotal hs
+
+end Coupon
 end Shop

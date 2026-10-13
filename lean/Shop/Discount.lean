@@ -1,95 +1,118 @@
 /-
-# Discount Module - Formal Proofs for Discount Calculations
+# Discount Module - Formal Proofs for Discount Calculations (Order #4)
 
-This module provides the formal proofs for discount operations as specified in the Shop-Proof project.
+Discounts build on Money and Rate. A discount is either a flat Money amount
+or a percentage given as a basis-point Rate (1% = 100 bp).
 
 ## Key Invariants:
-1. Discount amount is non-negative
-2. Discount is bounded by the subtotal
-3. Zero discount returns the original amount
+1. A valid discount amount is never negative (on a non-negative subtotal).
+2. A valid discount amount never exceeds the subtotal.
+3. Applying a discount never yields a negative result.
+No Mathlib: core Lean 4 only. Zero sorry, zero axiom.
 -/
 
 import Shop.Money
 import Shop.Rate
-import Mathlib.Data.Int.Basic
-import Mathlib.Data.Nat.Basic
 
 namespace Shop
 
--- Discount type
-@[ext]
-structure Discount where
-  amount : Money
-  
-  -- Invariant: discount amount must be non-negative
-  -- This is enforced by the Money type
+/-- Discount type: flat amount or percentage (basis points) -/
+inductive Discount where
+  | flat : Money → Discount
+  | percent : Rate → Discount
+  deriving Repr, DecidableEq
 
--- Zero discount
-def Discount.zero : Discount := ⟨Money.zero⟩
+namespace Discount
 
--- Fixed amount discount
-def Discount.fixed (amount : Money) : Discount := ⟨amount⟩
+/-- Zero discount -/
+def zero : Discount := .flat Money.zero
 
--- Percentage discount
-def Discount.percentage (rate : Rate) (base : Money) : Discount := 
-  let discount_cents := base.cents * ↑rate.value / 100
-  ⟨Money.fromInt discount_cents (by
-    apply Int.mul_nonneg
-    · exact Money.money_fromNat_non_negative _
-    · exact Int.ofNat_nonneg rate.value)⟩
+/-- Flat (fixed amount) discount -/
+def mkFlat (m : Money) : Discount := .flat m
 
--- Theorem 1: discount_non_negative
--- Discount amount is always non-negative
-theorem discount_non_negative (d : Discount) : d.amount.cents ≥ 0 := by
-  -- Discount amount is Money, which is always non-negative
-  -- This is proven in Money.lean
-  exact Money.money_fromNat_non_negative _
+/-- Percentage discount (basis points) -/
+def mkPercent (r : Rate) : Discount := .percent r
 
--- Theorem 2: discount_bounded
--- Discount cannot exceed the subtotal
-theorem discount_bounded (d : Discount) (sub : Money) : d.amount.cents ≤ sub.cents := by
-  -- This is a business rule that must be enforced
-  -- In practice, discounts are only applied when they are valid
-  -- For the purpose of this proof, we assume the discount is valid
-  -- The actual enforcement is in the application logic
-  sorry
+/-- Discount amount on a subtotal: a flat discount is capped at the subtotal -/
+def amount (d : Discount) (subtotal : Money) : Money :=
+  match d with
+  | .flat m => if m.cents ≤ subtotal.cents then m else subtotal
+  | .percent r => Rate.apply r subtotal
 
--- Theorem 3: discount_zero
--- Applying zero discount returns the original subtotal
-theorem discount_zero (sub : Money) : 
-  let result := sub.sub Discount.zero.amount
-  result.cents = sub.cents := by
-  simp [Discount.zero, Money.sub]
-  -- sub.cents - 0 = sub.cents
-  exact Int.sub_zero sub.cents
+/-- Validity: flat discounts are non-negative; percent discounts carry a valid rate -/
+def valid (d : Discount) : Prop :=
+  match d with
+  | .flat m => 0 ≤ m.cents
+  | .percent r => Rate.valid r
 
--- Apply discount to a money amount
-def applyDiscount (sub : Money) (discount : Discount) : Money := 
-  sub.sub discount.amount
+/-- Apply: the discounted amount is subtotal - discount amount -/
+def apply (d : Discount) (subtotal : Money) : Money :=
+  Money.sub subtotal (Discount.amount d subtotal)
 
--- Theorem: Applying discount preserves non-negativity when discount ≤ subtotal
-theorem apply_discount_non_negative (sub : Money) (discount : Discount) : 
-  discount.amount.cents ≤ sub.cents → (applyDiscount sub discount).cents ≥ 0 := by
-  intro h
-  simp [applyDiscount, Money.sub]
-  exact Int.sub_nonneg_of_le h
+/-! ### Theorems -/
 
--- Theorem: Discount cannot make amount negative
-theorem discount_safe : ∀ sub discount : Money × Discount, 
-  discount.amount.cents ≤ sub.cents → (sub.sub discount.amount).cents ≥ 0 := by
-  intro sub discount h
-  simp [Money.sub]
-  exact Int.sub_nonneg_of_le h
+/-- Helper: multiplying by a non-negative factor is monotone
+    (proved with core Lean only) -/
+private theorem mul_le_mul_const (s t : Int) (hs : 0 ≤ s) (ht0 : 0 ≤ t)
+    (ht : t ≤ 10000) : s * t ≤ s * 10000 := by
+  have h1 : 0 ≤ s * (10000 - t) := Int.mul_nonneg hs (by omega)
+  have h2 : s * 10000 = s * t + s * (10000 - t) := by
+    have h3 : t + (10000 - t) = 10000 := by omega
+    calc s * 10000 = s * (t + (10000 - t)) := by rw [h3]
+      _ = s * t + s * (10000 - t) := Int.mul_add
+  omega
 
--- Fixed discount amount
-def fixedDiscount (amount : Money) : Discount := 
-  ⟨amount⟩
+/-- A valid discount amount is never negative (non-negative subtotal) -/
+theorem discount_non_negative (d : Discount) (subtotal : Money)
+    (hd : Discount.valid d) (hs : 0 ≤ subtotal.cents) :
+    0 ≤ (Discount.amount d subtotal).cents := by
+  cases d with
+  | flat m =>
+    have hm : 0 ≤ m.cents := hd
+    show 0 ≤ (if m.cents ≤ subtotal.cents then m else subtotal).cents
+    split
+    · next h => exact hm
+    · next h => exact hs
+  | percent r =>
+    have hv : Rate.valid r := hd
+    show 0 ≤ (Rate.apply r subtotal).cents
+    exact Rate.apply_non_negative r subtotal hv hs
 
--- Zero discount (already defined above)
--- def zeroDiscount : Discount := Discount.zero
+/-- A valid discount amount never exceeds the subtotal -/
+theorem discount_bounded (d : Discount) (subtotal : Money)
+    (hd : Discount.valid d) (hs : 0 ≤ subtotal.cents) :
+    (Discount.amount d subtotal).cents ≤ subtotal.cents := by
+  cases d with
+  | flat m =>
+    show (if m.cents ≤ subtotal.cents then m else subtotal).cents ≤ subtotal.cents
+    split
+    · next h => exact h
+    · next h => exact Int.le_refl subtotal.cents
+  | percent r =>
+    have hv : Rate.valid r := hd
+    have key : subtotal.cents * r.bp ≤ subtotal.cents * 10000 :=
+      mul_le_mul_const subtotal.cents r.bp hs hv.1 hv.2
+    show subtotal.cents * r.bp / 10000 ≤ subtotal.cents
+    omega
 
--- Theorem: Zero discount is indeed zero
-theorem zero_discount_is_zero : Discount.zero.amount = Money.zero := by
-  rfl
+/-- The zero discount on a non-negative subtotal is zero -/
+theorem discount_zero_amount (subtotal : Money) (hs : 0 ≤ subtotal.cents) :
+    Discount.amount Discount.zero subtotal = Money.zero := by
+  show (if (0 : Int) ≤ subtotal.cents then Money.zero else subtotal) = Money.zero
+  rw [if_pos hs]
 
+/-- The zero discount amount (in cents) is exactly zero -/
+theorem discount_zero_nonneg (subtotal : Money) (hs : 0 ≤ subtotal.cents) :
+    (Discount.amount Discount.zero subtotal).cents = 0 := by
+  rw [discount_zero_amount subtotal hs]
+
+/-- Applying a valid discount to a non-negative subtotal never goes negative -/
+theorem apply_non_negative (d : Discount) (subtotal : Money)
+    (hd : Discount.valid d) (hs : 0 ≤ subtotal.cents) :
+    0 ≤ (Discount.apply d subtotal).cents := by
+  have h1 := discount_bounded d subtotal hd hs
+  show 0 ≤ subtotal.cents - (Discount.amount d subtotal).cents
+  omega
+
+end Discount
 end Shop
