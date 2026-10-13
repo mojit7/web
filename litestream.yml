@@ -1,0 +1,11 @@
+version: "0.3"
+
+# Shop-Proof Database Backup Configuration
+dbs:
+  - path: /var/lib/shop-proof/shop.db
+    replicas:
+      - url: s3://shop-proof-backups/shop.db
+        region: default
+        endpoint: https://s3.example.com
+        access-key-id: ${S3_ACCESS_KEY}
+        secret-access-key: ${S3_SECRET_KEY}

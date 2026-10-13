@@ -1,0 +1,18 @@
+[Unit]
+Description=Shop-Proof E-Commerce Server
+After=network.target
+
+[Service]
+Type=simple
+User=shop-proof
+WorkingDirectory=/usr/local/bin
+ExecStart=/usr/local/bin/shop-proof
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+
+# Database
+Environment=DATABASE_URL=/var/lib/shop-proof/shop.db
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,36 @@
+[package]
+name = "shop-proof-core"
+version = "0.1.0"
+edition = "2021"
+authors = ["Shop-Proof Team"]
+description = "Formal Proof E-Commerce Core Domain - Extracted from Lean 4"
+license = "MIT"
+readme = "../README.md"
+
+[dependencies]
+# Core types
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+
+# Property-based testing
+proptest = "1.0"
+proptest-derive = "0.4"
+
+[dev-dependencies]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true
+
+[features]
+default = []
+
+[[bench]]
+name = "money_bench"
+harness = false
