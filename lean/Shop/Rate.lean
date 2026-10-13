@@ -1,65 +1,66 @@
 /-
-# Rate Module - Formal Proofs for Rate Calculations
+# Rate Module - Basis-Point Rates
 
-This module provides the formal proofs for rate operations.
-Rates are used for tax calculations and discounts.
+A rate is expressed in basis points (bp): 1% = 100 bp, so 9% = 900 bp.
+Rates in [0, 10000] bp are valid. This module is the prerequisite for Tax.
+No Mathlib: core Lean 4 only.
 
-## Key Invariants:
-1. Rate is between 0 and 100 (percentage)
-2. Rate operations preserve bounds
+## Key facts:
+1. apply r base = (base.cents * r.bp) / 10000   (integer division, truncation)
+2. A zero rate gives zero money.
+3. Applying a valid rate to a non-negative base is non-negative.
+4. Application is monotone for valid rates.
 -/
 
 import Shop.Money
-import Mathlib.Data.Int.Basic
-import Mathlib.Data.Nat.Basic
 
 namespace Shop
 
--- Rate type: percentage as natural number (0-100)
-@[ext]
-structure Rate where
-  value : Nat
-  
-  -- Invariant: rate must be between 0 and 100
-  valid : value ≤ 100
+/-- Rate in basis points (1% = 100 bp) -/
+@[ext] structure Rate where
+  bp : Int
+  deriving Repr, DecidableEq, Inhabited
 
-def Rate.new (v : Nat) (h : v ≤ 100) : Rate := ⟨v, h⟩
+namespace Rate
 
--- Zero rate
-def Rate.zero : Rate := ⟨0, Nat.zero_le 100⟩
+/-- Zero rate -/
+def zero : Rate := ⟨0⟩
 
--- Maximum rate (100%)
-def Rate.max : Rate := ⟨100, Nat.le_refl 100⟩
+/-- Sum of two rates (for display purposes only) -/
+def add (a b : Rate) : Rate := ⟨a.bp + b.bp⟩
 
--- Theorem: Rate is always ≤ 100
-theorem rate_le_100 : ∀ r : Rate, r.value ≤ 100 := by
-  intro r
-  exact r.valid
+/-- Validity: 0 ≤ bp ≤ 10000 -/
+def valid (r : Rate) : Prop := 0 ≤ r.bp ∧ r.bp ≤ 10000
 
--- Theorem: Rate is always ≥ 0
-theorem rate_ge_0 : ∀ r : Rate, r.value ≥ 0 := by
-  intro r
-  exact Nat.zero_le r.value
+/-- Apply a rate to a money amount: (base * bp) / 10000 -/
+def apply (r : Rate) (base : Money) : Money := ⟨base.cents * r.bp / 10000⟩
 
--- Theorem: Zero rate is valid
-theorem zero_rate_valid : Rate.zero.value = 0 := by
-  rfl
+/-- Zero rate applied to any base gives zero -/
+theorem zero_apply (base : Money) : Rate.apply Rate.zero base = Money.zero := by
+  apply Money.ext
+  show base.cents * 0 / 10000 = 0
+  omega
 
--- Theorem: Max rate is 100
-theorem max_rate_value : Rate.max.value = 100 := by
-  rfl
+/-- A valid rate applied to a non-negative base is non-negative -/
+theorem apply_non_negative (r : Rate) (base : Money)
+    (hr : Rate.valid r) (hb : 0 ≤ base.cents) :
+    0 ≤ (Rate.apply r base).cents := by
+  have h : 0 ≤ base.cents * r.bp := Int.mul_nonneg hb hr.1
+  show 0 ≤ base.cents * r.bp / 10000
+  omega
 
--- Rate equality
-theorem rate_eq : ∀ r1 r2 : Rate, r1.value = r2.value → r1 = r2 := by
-  intro r1 r2 h
-  ext
-  exact h
+/-- Application of a valid rate is monotone in the base -/
+theorem apply_monotone (r : Rate) (a b : Money)
+    (hr : Rate.valid r) (ha : 0 ≤ a.cents) (hab : a.cents ≤ b.cents) :
+    (Rate.apply r a).cents ≤ (Rate.apply r b).cents := by
+  have hstep : b.cents * r.bp = a.cents * r.bp + (b.cents - a.cents) * r.bp := by
+    have hb' : b.cents = a.cents + (b.cents - a.cents) := by omega
+    rw [hb', Int.add_mul]
+  have hpos : 0 ≤ (b.cents - a.cents) * r.bp :=
+    Int.mul_nonneg (by omega) hr.1
+  show a.cents * r.bp / 10000 ≤ b.cents * r.bp / 10000
+  rw [hstep]
+  omega
 
--- Convert rate to integer for calculations
-def Rate.toInt (r : Rate) : Int := ↑r.value
-
--- Convert rate to float for display (but never used in calculations)
--- This is for display purposes only, not for financial calculations
--- def Rate.toFloat (r : Rate) : Float := (r.value : Float) / 100.0
-
+end Rate
 end Shop
